@@ -17,8 +17,9 @@ Passar a string Hex completa para calcular sem CRC
 Usar o CRC-16/MODBUS com os bytes invertidos
 */
 
-void main()
+int main()
 {
+    // Abrindo porta serial do ESP32
     printf("Configurando porta Serial:\n");
     char *portname = "/dev/ttyUSB0";
     int fd = open(portname, O_RDWR | O_NOCTTY | O_SYNC);
@@ -26,6 +27,7 @@ void main()
         perror("Erro ao abrir a porta serial");
         return 1;
     }
+    // Configurando comunicação da porta serial do ESP32
     struct termios tty;
     memset(&tty, 0, sizeof(tty));
     if (tcgetattr(fd, &tty) != 0) {
@@ -49,55 +51,65 @@ void main()
         perror("Erro ao configurar a porta serial");
         return 1;
     }
-    int bytes_written = 0;
-    int bytes_read = 0;
-    char response[10];
 
-    /* 0x01, 0x03, 0x00, 0xHH, 0x00, 0x01, 0xC2, 0xC1 */
-    char temp[] = {0x01, 0x03, 0x00, 0x0A, 0x00, 0x01, 0xA4, 0x08};
-    char umid[] = {0x01, 0x03, 0x00, 0x0B, 0x00, 0x01, 0xF5, 0xC8};
-    char pres[] = {0x01, 0x03, 0x00, 0x0C, 0x00, 0x01, 0x44, 0x09};
+    // transmissao da porta serial em MODBUS
+    int bytes_escritos = 0;
+    int bytes_lidos = 0;
+    char resposta[10];
+
+    // comandos modbus para cada medida
+    // ID_SLAVE, CMD_Leitura (0x03), Med_H, Med_L, SE_H, SE_L, CRC_L, CRC_H}
+    char temp[] = {0x01, 0x03, 0x00, 0x00, 0x00, 0x01, 0x84, 0x0A};
+    char umid[] = {0x01, 0x03, 0x00, 0x58, 0x00, 0x01, 0x05, 0xD9};
+    char pres[] = {0x01, 0x03, 0x00, 0x43, 0x00, 0x01, 0x75, 0xDE};
 
     float tempVal = 0.0f;
     float umidVal = 0.0f;
     float presVal = 0.0f;
 
-
-    while (1)
+    while (1) // repete infinitamente
     {
         printf("Temp: ");
-        bytes_written = write(fd, temp, sizeof(temp));
-        usleep(200 * 1000);
-        bytes_read = read(fd, response, 8);
-        if (bytes_read > 4)
+        bytes_escritos = write(fd, temp, 8);
+
+        usleep(200 * 1000); // 200 ms
+
+        bytes_lidos = read(fd, resposta, 8);
+        if (bytes_lidos > 4)
         {
-            tempVal = (int)((response[3] << 8) + response[4]) / 10.0f;
+            tempVal = (int)((resposta[3] << 8) + resposta[4]) / 10.0f;
             printf("%.1f\n", tempVal);
         }
         else
             printf("Sem resposta!\n");
 
         usleep(200 * 1000);
+
         printf("umid: ");
-        bytes_written = write(fd, umid, sizeof(umid));
+        bytes_escritos = write(fd, umid, sizeof(umid));
+
         usleep(200 * 1000);
-        bytes_read = read(fd, response, 8);
-        if (bytes_read > 4)
+
+        bytes_lidos = read(fd, resposta, 8);
+        if (bytes_lidos > 4)
         {
-            umidVal = (int)((response[3] << 8) + response[4]) / 100.0f;
+            umidVal = (int)((resposta[3] << 8) + resposta[4]) / 100.0f;
             printf("%.2f\n", umidVal);
         }
         else
             printf("Sem resposta!\n");
         
         usleep(200 * 1000);
+
         printf("pres: ");
-        bytes_written = write(fd, pres, sizeof(pres));
+        bytes_escritos = write(fd, pres, sizeof(pres));
+
         usleep(200 * 1000);
-        bytes_read = read(fd, response, 8);
-        if (bytes_read > 4)
+
+        bytes_lidos = read(fd, resposta, 8);
+        if (bytes_lidos > 4)
         {
-            presVal = (int)((response[3] << 8) + response[4]) / 100.0f;
+            presVal = (int)((resposta[3] << 8) + resposta[4]) / 100.0f;
             printf("%.2f\n", presVal);
         }
         else
