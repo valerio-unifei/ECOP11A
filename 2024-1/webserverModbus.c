@@ -1,12 +1,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/socket.h> //UBUNTU
+#include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
-
-#include <stdio.h>
-#include <string.h>
 #include <unistd.h>
 #include <fcntl.h>
 #include <errno.h>
@@ -16,6 +13,7 @@
 #define PORT 8080
 #define BUFFER_SIZE 1024
 
+// Estrutura para armazenar uma medição
 struct Medicao {
     time_t instante;    // Armazena o instante de tempo
     float temperatura;  // Armazena a temperatura em graus Celsius
@@ -25,26 +23,34 @@ struct Medicao {
 
 int main()
 {
-    struct Medicao medidas[10];
-    int med_n = 0;
+    struct Medicao medidas[10]; // Array para armazenar até 10 medições
+    int med_n = 0; // Índice atual do array de medições
 
-    /* Inicizalição do servidor web*/
+    // Inicialização do servidor web
     char buffer[BUFFER_SIZE];
     int server_socket, client_socket;
     struct sockaddr_in server_addr, client_addr;
     socklen_t client_len = sizeof(client_addr);
+
+    // Criação do socket
     server_socket = socket(AF_INET, SOCK_STREAM, 0);
     if (server_socket < 0) {
         perror("socket creation failed");
         exit(1);
     }
+
+    // Configuração do endereço do servidor
     server_addr.sin_family = AF_INET;
     server_addr.sin_port = htons(PORT);
     inet_pton(AF_INET, "127.0.0.1", &server_addr.sin_addr);
+
+    // Ligação do socket ao endereço e porta especificados
     if (bind(server_socket, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0) {
         perror("bind failed");
         exit(1);
     }
+
+    // Configuração do socket para escutar conexões
     if (listen(server_socket, 3) < 0) {
         perror("listen failed");
         exit(1);
@@ -59,6 +65,7 @@ int main()
         perror("Erro ao abrir a porta serial");
         return 1;
     }
+
     // Configurando comunicação da porta serial do ESP32
     struct termios tty;
     memset(&tty, 0, sizeof(tty));
@@ -72,7 +79,6 @@ int main()
     tty.c_cflag &= ~CSTOPB;
     tty.c_cflag &= ~CSIZE;
     tty.c_cflag |= CS8;
-    //tty.c_cflag &= ~CRTSCTS;
     tty.c_cflag |= CREAD | CLOCAL;
     tty.c_iflag &= ~(IXON | IXOFF | IXANY);
     tty.c_lflag &= ~(ICANON | ECHO | ECHOE | ISIG);
@@ -83,66 +89,85 @@ int main()
         perror("Erro ao configurar a porta serial");
         return 1;
     }
-    // transmissao da porta serial em MODBUS
-    int bytes_escritos = 0;
-    int bytes_lidos = 0;
-    char resposta[10];
-    // comandos modbus para cada medida
-    // ID_SLAVE, CMD_Leitura (0x03), Med_H, Med_L, SE_H, SE_L, CRC_L, CRC_H}
-    char temp[] = {0x01, 0x03, 0x00, 0x00, 0x00, 0x01, 0x84, 0x0A};
-    char umid[] = {0x01, 0x03, 0x00, 0x58, 0x00, 0x01, 0x05, 0xD9};
-    char pres[] = {0x01, 0x03, 0x00, 0x43, 0x00, 0x01, 0x75, 0xDE};
 
-    /* controle de tempo na chamada da serial*/
-    clock_t tempo_anterior = clock();
-    clock_t tempo_atual;
-    double tempo_difer;
+    // Comandos Modbus para cada medida
+    unsigned char temp[] = {0x01, 0x03, 0x00, 0x00, 0x00, 0x01, 0x84, 0x0A};
+    unsigned char umid[] = {0x01, 0x03, 0x00, 0x58, 0x00, 0x01, 0x05, 0xD9};
+    unsigned char pres[] = {0x01, 0x03, 0x00, 0x43, 0x00, 0x01, 0x75, 0xDE};
+    unsigned char resposta[10];
+
+    clock_t tempo_anterior = clock(); // Tempo anterior para controle de tempo
+    clock_t tempo_atual; // Tempo atual
+    double tempo_difer; // Diferença de tempo
 
     while (1) {
-        /* Leitura ModBus a cada 1 segundo*/
+        // Leitura Modbus a cada 1 segundo
         tempo_atual = clock();
         tempo_difer = (double)(tempo_atual - tempo_anterior) / CLOCKS_PER_SEC * 1000;
         if (tempo_difer >= 1000) {
-        {
-            // instante de tempo
+            // Armazenando o instante de tempo da medição
             medidas[med_n].instante = time(NULL);
-            // medicao de temperatura
-            bytes_escritos = write(fd, temp, 8);
+
+            // Medição de temperatura
+            write(fd, temp, 8);
             usleep(10 * 1000);
-            bytes_lidos = read(fd, resposta, 8);
+            read(fd, resposta, 8);
             medidas[med_n].temperatura = (int)((resposta[3] << 8) + resposta[4]) / 10.0f;
-            // medicao de umidade
-            bytes_escritos = write(fd, umid, 8);
+
+            // Medição de umidade
+            write(fd, umid, 8);
             usleep(10 * 1000);
-            bytes_lidos = read(fd, resposta, 8);
+            read(fd, resposta, 8);
             medidas[med_n].umidade = (int)((resposta[3] << 8) + resposta[4]) / 10.0f;
-            // medicao de pressao
-            bytes_escritos = write(fd, pres, 8);
+
+            // Medição de pressão
+            write(fd, pres, 8);
             usleep(10 * 1000);
-            bytes_lidos = read(fd, resposta, 8);
+            read(fd, resposta, 8);
             medidas[med_n].pressao = (int)((resposta[3] << 8) + resposta[4]) / 10.0f;
-            // retorna para inicio do vetor se > 9
-            med_n = (med_n >= 9)? 0 : med_n + 1 ;
+
+            // Atualiza o índice do array de medições
+            med_n = (med_n >= 9) ? 0 : med_n + 1;
+            tempo_anterior = tempo_atual; // Atualiza o tempo anterior
         }
 
-        /* Conexao do cliente no servidor Web */
+        // Conexão do cliente no servidor web
         client_socket = accept(server_socket, (struct sockaddr *)&client_addr, &client_len);
         if (client_socket < 0) {
             perror("accept failed");
             continue;
         }
 
-        char response[] = "HTTP/1.1 200 OK\r\n"
-                      "Content-Type: text/html\r\n"
-                      "\r\n"
-                      "<html><body><h1>Welcome to my web server!</h1></body></html>";
-
+        // Recebendo a requisição do cliente
         recv(client_socket, buffer, BUFFER_SIZE, 0);
         printf("Received request: %s\n", buffer);
 
-        send(client_socket, response, strlen(response), 0);
-        close(client_socket);
+        // Preparando a resposta HTTP
+        char response_header[] = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n";
+        char response_body[BUFFER_SIZE];
+        sprintf(response_body,
+                "<html><head><title>Medições</title></head><body><h1>Tabela de Medições</h1>"
+                "<table border='1'><tr><th>Instante</th><th>Temperatura (°C)</th><th>Umidade (%)</th><th>Pressão (hPa)</th></tr>");
+
+        // Adicionando as medições na tabela HTML
+        for (int i = 0; i < 10; i++) {
+            char row[256];
+            struct tm *tm_info = localtime(&medidas[i].instante);
+            char time_str[26];
+            strftime(time_str, 26, "%Y-%m-%d %H:%M:%S", tm_info);
+            sprintf(row, "<tr><td>%s</td><td>%.1f</td><td>%.1f</td><td>%.1f</td></tr>",
+                    time_str, medidas[i].temperatura, medidas[i].umidade, medidas[i].pressao);
+            strcat(response_body, row);
+        }
+
+        strcat(response_body, "</table></body></html>");
+
+        // Enviando a resposta HTTP para o cliente
+        send(client_socket, response_header, strlen(response_header), 0);
+        send(client_socket, response_body, strlen(response_body), 0);
+        close(client_socket); // Fechando a conexão com o cliente
     }
 
+    close(server_socket); // Fechando o socket do servidor
     return 0;
 }
