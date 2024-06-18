@@ -10,6 +10,8 @@
 #include <termios.h>
 #include <time.h>
 
+#define min(a, b) ((a < b) ? a : b)
+
 #define PORT 8080
 #define BUFFER_SIZE 1024
 
@@ -23,7 +25,7 @@ struct Medicao {
 
 int main()
 {
-    struct Medicao medidas[10]; // Array para armazenar até 10 medições
+    struct Medicao medidas[1000]; // Array para armazenar até 10 medições
     int med_n = 0; // Índice atual do array de medições
 
     // Inicialização do servidor web
@@ -35,7 +37,7 @@ int main()
     // Criação do socket
     server_socket = socket(AF_INET, SOCK_STREAM, 0);
     if (server_socket < 0) {
-        perror("socket creation failed");
+        perror("erro na criação do socket");
         exit(1);
     }
 
@@ -46,48 +48,48 @@ int main()
 
     // Ligação do socket ao endereço e porta especificados
     if (bind(server_socket, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0) {
-        perror("bind failed");
+        perror("erro na ligação do socket ao endereço e porta");
         exit(1);
     }
 
     // Configuração do socket para escutar conexões
     if (listen(server_socket, 3) < 0) {
-        perror("listen failed");
+        perror("erro do socket para escutar conexões");
         exit(1);
     }
-    printf("Server started on port %d...\n", PORT);
+    printf("Servidor iniciado na porta %d.\n", PORT);
 
     // Abrindo porta serial do ESP32
     printf("Configurando porta Serial:\n");
     char *portname = "/dev/ttyUSB0";
     int fd = open(portname, O_RDWR | O_NOCTTY | O_SYNC);
-    if (fd < 0) {
-        perror("Erro ao abrir a porta serial");
-        return 1;
-    }
-
-    // Configurando comunicação da porta serial do ESP32
     struct termios tty;
-    memset(&tty, 0, sizeof(tty));
-    if (tcgetattr(fd, &tty) != 0) {
-        perror("Erro ao obter os atributos da porta serial");
-        return 1;
+    if (fd > 0) {
+        // Configurando comunicação da porta serial do ESP32
+        memset(&tty, 0, sizeof(tty));
+        if (tcgetattr(fd, &tty) != 0) {
+            perror("Erro ao obter os atributos da porta serial");
+            return 1;
+        }
+        cfsetospeed(&tty, B9600);
+        cfsetispeed(&tty, B9600);
+        tty.c_cflag &= ~PARENB;
+        tty.c_cflag &= ~CSTOPB;
+        tty.c_cflag &= ~CSIZE;
+        tty.c_cflag |= CS8;
+        tty.c_cflag |= CREAD | CLOCAL;
+        tty.c_iflag &= ~(IXON | IXOFF | IXANY);
+        tty.c_lflag &= ~(ICANON | ECHO | ECHOE | ISIG);
+        tty.c_oflag &= ~OPOST;
+        tty.c_cc[VMIN] = 0;
+        tty.c_cc[VTIME] = 10;
+        if (tcsetattr(fd, TCSANOW, &tty) != 0) {
+            perror("Erro ao configurar a porta serial");
+            return 1;
+        }
     }
-    cfsetospeed(&tty, B9600);
-    cfsetispeed(&tty, B9600);
-    tty.c_cflag &= ~PARENB;
-    tty.c_cflag &= ~CSTOPB;
-    tty.c_cflag &= ~CSIZE;
-    tty.c_cflag |= CS8;
-    tty.c_cflag |= CREAD | CLOCAL;
-    tty.c_iflag &= ~(IXON | IXOFF | IXANY);
-    tty.c_lflag &= ~(ICANON | ECHO | ECHOE | ISIG);
-    tty.c_oflag &= ~OPOST;
-    tty.c_cc[VMIN] = 0;
-    tty.c_cc[VTIME] = 10;
-    if (tcsetattr(fd, TCSANOW, &tty) != 0) {
-        perror("Erro ao configurar a porta serial");
-        return 1;
+    else {
+        perror("Erro ao abrir a porta serial");
     }
 
     // Comandos Modbus para cada medida
@@ -104,7 +106,7 @@ int main()
         // Leitura Modbus a cada 1 segundo
         tempo_atual = clock();
         tempo_difer = (double)(tempo_atual - tempo_anterior) / CLOCKS_PER_SEC * 1000;
-        if (tempo_difer >= 1000) {
+        if (tempo_difer >= 1000 && fd >= 0) {
             // Armazenando o instante de tempo da medição
             medidas[med_n].instante = time(NULL);
 
@@ -134,29 +136,29 @@ int main()
         // Conexão do cliente no servidor web
         client_socket = accept(server_socket, (struct sockaddr *)&client_addr, &client_len);
         if (client_socket < 0) {
-            perror("accept failed");
+            perror("Erro na conexão do cliente\n");
             continue;
         }
 
         // Recebendo a requisição do cliente
         recv(client_socket, buffer, BUFFER_SIZE, 0);
-        printf("Received request: %s\n", buffer);
+        printf("Requisição: %s\n", buffer);
 
         // Preparando a resposta HTTP
-        char response_header[] = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n";
+        char response_header[] = "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=UTF-8\r\n\r\n";
         char response_body[BUFFER_SIZE];
         sprintf(response_body,
                 "<html><head><title>Medições</title></head><body><h1>Tabela de Medições</h1>"
-                "<table border='1'><tr><th>Instante</th><th>Temperatura (°C)</th><th>Umidade (%)</th><th>Pressão (hPa)</th></tr>");
+                "<table border='1'>"
+                "<tr><th>Instante</th><th>Temperatura (°C)</th><th>Umidade (%)</th><th>Pressão (hPa)</th></tr>");
 
         // Adicionando as medições na tabela HTML
-        for (int i = 0; i < 10; i++) {
+        for (int i = 0; i < min(med_n, sizeof(medidas)); i++) {
             char row[256];
             struct tm *tm_info = localtime(&medidas[i].instante);
             char time_str[26];
             strftime(time_str, 26, "%Y-%m-%d %H:%M:%S", tm_info);
-            sprintf(row, "<tr><td>%s</td><td>%.1f</td><td>%.1f</td><td>%.1f</td></tr>",
-                    time_str, medidas[i].temperatura, medidas[i].umidade, medidas[i].pressao);
+            sprintf(row, "<tr><td>%s</td><td>%.1f</td><td>%.1f</td><td>%.1f</td></tr>", time_str, medidas[i].temperatura, medidas[i].umidade, medidas[i].pressao);
             strcat(response_body, row);
         }
 
